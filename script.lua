@@ -19,11 +19,13 @@ local Viewport = Instance.new("ViewportFrame")
 Viewport.Size = UDim2.new(1, 0, 1, 0)
 Viewport.BackgroundTransparency = 1
 Viewport.CurrentCamera = Camera
+Viewport.LightColor = Color3.fromRGB(255, 255, 255)
+Viewport.LightDirection = Vector3.new(-1, -1, -1)
+Viewport.Ambient = Color3.fromRGB(200, 200, 200)
 Viewport.Parent = ScreenGui
 
 local activeChams = {}
 
--- Функция для определения VR-рук
 local function isVRHand(part)
     if not part:IsA("BasePart") then return false end
     
@@ -37,59 +39,11 @@ local function isVRHand(part)
     end
     
     local name = part.Name
-    if name == "RightHand" or name == "LeftHand" or 
-       name == "RightUpperArm" or name == "LeftUpperArm" or
-       name == "RightLowerArm" or name == "LeftLowerArm" or
-       name == "Skull" or name == "Head" then
-        return true
-    end
-    
-    if string.find(name, "VR") or string.find(name, "Hand") or 
-       string.find(name, "Controller") or string.find(name, "Skull") then
+    if string.find(name, "VR") or string.find(name, "Controller") then
         return true
     end
     
     return false
-end
-
--- Функция для очистки VR-рук в клоне
-local function fixVRHands(model)
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            if isVRHand(obj) then
-                obj.Transparency = 1
-            end
-        end
-    end
-end
-
--- Функция для копирования аксессуаров
-local function copyAccessories(originalChar, cloneChar)
-    local originalHead = originalChar:FindFirstChild("Head")
-    local cloneHead = cloneChar:FindFirstChild("Head")
-    if not originalHead or not cloneHead then return end
-    
-    -- Удаляем старые аксессуары из клона
-    for _, child in ipairs(cloneHead:GetChildren()) do
-        if child:IsA("Accessory") then
-            child:Destroy()
-        end
-    end
-    
-    -- Копируем все аксессуары из оригинала
-    for _, accessory in ipairs(originalHead:GetChildren()) do
-        if accessory:IsA("Accessory") then
-            local cloneAccessory = accessory:Clone()
-            cloneAccessory.Parent = cloneHead
-            
-            local cloneHandle = cloneAccessory:FindFirstChild("Handle")
-            if cloneHandle and cloneHandle:IsA("BasePart") then
-                cloneHandle.Transparency = CHAMS_TRANSPARENCY
-                cloneHandle.CanCollide = false
-                cloneHandle.Anchored = true
-            end
-        end
-    end
 end
 
 local function applyNameESP(player, char)
@@ -134,177 +88,72 @@ local function applyPlayerFeatures(player)
 
         if activeChams[player] then
             if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
-            if activeChams[player].Conn1 then activeChams[player].Conn1:Disconnect() end
-            if activeChams[player].Conn2 then activeChams[player].Conn2:Disconnect() end
             if activeChams[player].Model then activeChams[player].Model:Destroy() end
             activeChams[player] = nil
         end
 
-        char.Archivable = true
-        local cloneModel = char:Clone()
-        char.Archivable = false
+        local cloneModel = Instance.new("Model")
+        cloneModel.Name = player.Name .. "_Cham"
 
-        -- Удаляем ненужные объекты
-        for _, obj in ipairs(cloneModel:GetDescendants()) do
-            if obj:IsA("LuaSourceContainer") or obj:IsA("Sound") then
-                obj:Destroy()
-            elseif obj:IsA("BasePart") then
-                obj.CanCollide = false
-                obj.Anchored = true
-                if obj.Name ~= "HumanoidRootPart" then
-                    obj.Transparency = CHAMS_TRANSPARENCY
+        local fakeHumanoid = Instance.new("Humanoid")
+        fakeHumanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+        fakeHumanoid.Parent = cloneModel
+
+        local partPairs = {}
+
+        -- Глубокий обход всех вложенных объектов для полного захвата аксессуаров VR
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("BasePart") then
+                if isVRHand(obj) or obj.Name == "HumanoidRootPart" then
+                    -- Игнорируем руки VR и служебный HumanoidRootPart
                 else
-                    obj.Transparency = 1
-                end
-            end
-        end
-
-        -- Удаляем аксессуары из клона
-        for _, obj in ipairs(cloneModel:GetChildren()) do
-            if obj:IsA("Accessory") then
-                obj:Destroy()
-            end
-        end
-
-        fixVRHands(cloneModel)
-        cloneModel.Parent = Viewport
-        
-        task.wait(0.1)
-        copyAccessories(char, cloneModel)
-
-        local childConn1
-        local childConn2
-        local renderConn
-
-        childConn1 = char.ChildAdded:Connect(function(child)
-            task.wait(0.1)
-            if not char.Parent or not cloneModel then return end
-
-            if child:IsA("Accessory") then
-                copyAccessories(char, cloneModel)
-                return
-            end
-
-            -- Полное обновление клона
-            cloneModel:Destroy()
-            char.Archivable = true
-            cloneModel = char:Clone()
-            char.Archivable = false
-
-            for _, obj in ipairs(cloneModel:GetDescendants()) do
-                if obj:IsA("LuaSourceContainer") or obj:IsA("Sound") then
-                    obj:Destroy()
-                elseif obj:IsA("BasePart") then
-                    obj.CanCollide = false
-                    obj.Anchored = true
-                    if obj.Name ~= "HumanoidRootPart" then
-                        obj.Transparency = CHAMS_TRANSPARENCY
-                    else
-                        obj.Transparency = 1
-                    end
-                end
-            end
-            
-            for _, obj in ipairs(cloneModel:GetChildren()) do
-                if obj:IsA("Accessory") then
-                    obj:Destroy()
-                end
-            end
-            
-            fixVRHands(cloneModel)
-            cloneModel.Parent = Viewport
-            task.wait(0.1)
-            copyAccessories(char, cloneModel)
-        end)
-
-        childConn2 = char.ChildRemoved:Connect(function(child)
-            if child:IsA("Tool") or child:IsA("Accoutrement") or child:IsA("Accessory") then
-                task.wait(0.1)
-                if cloneModel then
-                    for _, obj in ipairs(cloneModel:GetDescendants()) do
-                        if obj.Name == child.Name and obj:IsA("Accessory") then
-                            obj:Destroy()
-                            break
+                    local clonePart = obj:Clone()
+                    
+                    for _, child in ipairs(clonePart:GetDescendants()) do
+                        if child:IsA("JointInstance") or child:IsA("Script") or child:IsA("LocalScript") then
+                            child:Destroy()
                         end
                     end
-                end
-            end
-        end)
 
-        -- ГЛАВНОЕ ИЗМЕНЕНИЕ: Обновление по имени каждый кадр
-        renderConn = RunService.RenderStepped:Connect(function()
+                    clonePart.CanCollide = false
+                    clonePart.Anchored = true
+                    clonePart.CastShadow = false
+
+                    -- Принудительно показываем аксессуары, даже если скрипты игры скрывают оригинал
+                    if obj.Parent:IsA("Accessory") then
+                        clonePart.Transparency = CHAMS_TRANSPARENCY
+                    else
+                        clonePart.Transparency = obj.Transparency > CHAMS_TRANSPARENCY and obj.Transparency or CHAMS_TRANSPARENCY
+                    end
+
+                    clonePart.Parent = cloneModel
+                    table.insert(partPairs, {Orig = obj, Clone = clonePart})
+                end
+            elseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("CharacterMesh") or obj:IsA("BodyColors") or obj:IsA("ShirtGraphic") then
+                obj:Clone().Parent = cloneModel
+            end
+        end
+
+        cloneModel.Parent = Viewport
+
+        local renderConn = RunService.RenderStepped:Connect(function()
             if not char or not char.Parent or not cloneModel or not cloneModel.Parent then
                 if renderConn then renderConn:Disconnect() end
-                if childConn1 then childConn1:Disconnect() end
-                if childConn2 then childConn2:Disconnect() end
                 if cloneModel then cloneModel:Destroy() end
                 activeChams[player] = nil
                 return
             end
 
-            -- Обновляем ВСЕ BasePart в клоне по имени из оригинала
-            for _, clonePart in ipairs(cloneModel:GetDescendants()) do
-                if clonePart:IsA("BasePart") then
-                    -- Ищем оригинальную часть с таким же путем/именем
-                    local origPart
-                    
-                    -- Сначала пробуем найти по полному пути
-                    local fullPath = clonePart:GetFullName():sub(#cloneModel:GetFullName() + 2)
-                    if fullPath ~= "" then
-                        origPart = char:FindFirstChild(fullPath, true)
-                    end
-                    
-                    -- Если не нашли, пробуем найти по имени (для аксессуаров)
-                    if not origPart then
-                        -- Проверяем, является ли часть аксессуаром
-                        local parent = clonePart.Parent
-                        local isAccessory = false
-                        while parent do
-                            if parent:IsA("Accessory") then
-                                isAccessory = true
-                                break
-                            end
-                            parent = parent.Parent
-                        end
-                        
-                        if isAccessory then
-                            -- Для аксессуаров ищем Handle в голове
-                            local cloneHead = cloneModel:FindFirstChild("Head")
-                            local origHead = char:FindFirstChild("Head")
-                            if cloneHead and origHead then
-                                -- Ищем аксессуар с таким же именем
-                                for _, cloneAccessory in ipairs(cloneHead:GetChildren()) do
-                                    if cloneAccessory:IsA("Accessory") and cloneAccessory.Name == clonePart.Parent.Name then
-                                        local origAccessory = origHead:FindFirstChild(cloneAccessory.Name)
-                                        if origAccessory then
-                                            local origHandle = origAccessory:FindFirstChild("Handle")
-                                            if origHandle and origHandle:IsA("BasePart") then
-                                                origPart = origHandle
-                                            end
-                                        end
-                                        break
-                                    end
-                                end
-                            end
-                        else
-                            -- Обычная часть - ищем по имени
-                            origPart = char:FindFirstChild(clonePart.Name, true)
-                        end
-                    end
-                    
-                    -- Если нашли оригинал - копируем CFrame
-                    if origPart and origPart:IsA("BasePart") and origPart.Parent then
-                        clonePart.CFrame = origPart.CFrame
-                    end
+            for _, pair in ipairs(partPairs) do
+                if pair.Orig and pair.Orig.Parent and pair.Clone and pair.Clone.Parent then
+                    pair.Clone.CFrame = pair.Orig.CFrame
                 end
             end
         end)
 
         activeChams[player] = {
             Model = cloneModel,
-            Connection = renderConn,
-            Conn1 = childConn1,
-            Conn2 = childConn2
+            Connection = renderConn
         }
     end
 
@@ -323,14 +172,12 @@ Players.PlayerAdded:Connect(applyPlayerFeatures)
 Players.PlayerRemoving:Connect(function(player)
     if activeChams[player] then
         if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
-        if activeChams[player].Conn1 then activeChams[player].Conn1:Disconnect() end
-        if activeChams[player].Conn2 then activeChams[player].Conn2:Disconnect() end
         if activeChams[player].Model then activeChams[player].Model:Destroy() end
         activeChams[player] = nil
     end
 end)
 
--- GUI код (без изменений)
+-- GUI
 local MenuGui = Instance.new("ScreenGui")
 MenuGui.Name = "ChamsMenuGui"
 MenuGui.ResetOnSpawn = false
