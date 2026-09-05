@@ -23,38 +23,29 @@ Viewport.Parent = ScreenGui
 
 local activeChams = {}
 
--- Функция для определения VR-рук (без головы!)
+-- Функция для определения VR-рук
 local function isVRHand(part)
     if not part:IsA("BasePart") then return false end
     
-    -- Проверка по материалу Neon (часто используется для VR-рук)
     if part.Material == Enum.Material.Neon then
         return true
     end
     
-    -- Проверка по цвету (ярко-зеленый)
     local color = part.Color
     if color.G > 0.7 and color.R < 0.3 and color.B < 0.3 then
         return true
     end
     
-    -- Проверка по названию (только руки, без головы!)
     local name = part.Name
     if name == "RightHand" or name == "LeftHand" or 
        name == "RightUpperArm" or name == "LeftUpperArm" or
        name == "RightLowerArm" or name == "LeftLowerArm" or
-       name == "RightHandPart" or name == "LeftHandPart" then
+       name == "Skull" or name == "Head" then
         return true
     end
     
-    -- Проверка по названию (дополнительные варианты для рук)
-    if string.find(name, "VR") and (string.find(name, "Hand") or string.find(name, "Arm") or string.find(name, "Controller")) then
-        return true
-    end
-    
-    -- Проверка специальных VR-частей рук
-    if string.find(name, "Hand") and not string.find(name, "Handle") then
-        -- Дополнительная проверка: если это не Handle от оружия
+    if string.find(name, "VR") or string.find(name, "Hand") or 
+       string.find(name, "Controller") or string.find(name, "Skull") then
         return true
     end
     
@@ -65,9 +56,37 @@ end
 local function fixVRHands(model)
     for _, obj in ipairs(model:GetDescendants()) do
         if obj:IsA("BasePart") then
-            -- Проверяем, является ли часть VR-рукой
             if isVRHand(obj) then
-                obj.Transparency = 1 -- Делаем невидимой
+                obj.Transparency = 1
+            end
+        end
+    end
+end
+
+-- Функция для копирования аксессуаров
+local function copyAccessories(originalChar, cloneChar)
+    local originalHead = originalChar:FindFirstChild("Head")
+    local cloneHead = cloneChar:FindFirstChild("Head")
+    if not originalHead or not cloneHead then return end
+    
+    -- Удаляем старые аксессуары из клона
+    for _, child in ipairs(cloneHead:GetChildren()) do
+        if child:IsA("Accessory") then
+            child:Destroy()
+        end
+    end
+    
+    -- Копируем все аксессуары из оригинала
+    for _, accessory in ipairs(originalHead:GetChildren()) do
+        if accessory:IsA("Accessory") then
+            local cloneAccessory = accessory:Clone()
+            cloneAccessory.Parent = cloneHead
+            
+            local cloneHandle = cloneAccessory:FindFirstChild("Handle")
+            if cloneHandle and cloneHandle:IsA("BasePart") then
+                cloneHandle.Transparency = CHAMS_TRANSPARENCY
+                cloneHandle.CanCollide = false
+                cloneHandle.Anchored = true
             end
         end
     end
@@ -125,14 +144,13 @@ local function applyPlayerFeatures(player)
         local cloneModel = char:Clone()
         char.Archivable = false
 
-        -- Сначала удаляем ненужные объекты
+        -- Удаляем ненужные объекты
         for _, obj in ipairs(cloneModel:GetDescendants()) do
             if obj:IsA("LuaSourceContainer") or obj:IsA("Sound") then
                 obj:Destroy()
             elseif obj:IsA("BasePart") then
                 obj.CanCollide = false
                 obj.Anchored = true
-                -- Устанавливаем прозрачность для обычных частей
                 if obj.Name ~= "HumanoidRootPart" then
                     obj.Transparency = CHAMS_TRANSPARENCY
                 else
@@ -141,38 +159,33 @@ local function applyPlayerFeatures(player)
             end
         end
 
-        -- Применяем очистку VR-рук (делаем их полностью прозрачными)
-        fixVRHands(cloneModel)
-
-        cloneModel.Parent = Viewport
-
-        local partMap = {}
-
-        local function buildMap()
-            table.clear(partMap)
-            for _, orig in ipairs(char:GetDescendants()) do
-                if orig:IsA("BasePart") then
-                    local ancestorPath = orig:GetFullName():sub(#char:GetFullName() + 2)
-                    for _, clone in ipairs(cloneModel:GetDescendants()) do
-                        if clone:IsA("BasePart") and clone:GetFullName():sub(#cloneModel:GetFullName() + 2) == ancestorPath then
-                            partMap[orig] = clone
-                            break
-                        end
-                    end
-                end
+        -- Удаляем аксессуары из клона
+        for _, obj in ipairs(cloneModel:GetChildren()) do
+            if obj:IsA("Accessory") then
+                obj:Destroy()
             end
         end
 
-        buildMap()
+        fixVRHands(cloneModel)
+        cloneModel.Parent = Viewport
+        
+        task.wait(0.1)
+        copyAccessories(char, cloneModel)
 
         local childConn1
         local childConn2
         local renderConn
 
-        childConn1 = char.ChildAdded:Connect(function()
+        childConn1 = char.ChildAdded:Connect(function(child)
             task.wait(0.1)
             if not char.Parent or not cloneModel then return end
 
+            if child:IsA("Accessory") then
+                copyAccessories(char, cloneModel)
+                return
+            end
+
+            -- Полное обновление клона
             cloneModel:Destroy()
             char.Archivable = true
             cloneModel = char:Clone()
@@ -192,23 +205,33 @@ local function applyPlayerFeatures(player)
                 end
             end
             
-            -- Применяем очистку VR-рук для обновленного клона
-            fixVRHands(cloneModel)
+            for _, obj in ipairs(cloneModel:GetChildren()) do
+                if obj:IsA("Accessory") then
+                    obj:Destroy()
+                end
+            end
             
+            fixVRHands(cloneModel)
             cloneModel.Parent = Viewport
-            buildMap()
+            task.wait(0.1)
+            copyAccessories(char, cloneModel)
         end)
 
         childConn2 = char.ChildRemoved:Connect(function(child)
-            if child:IsA("Tool") or child:IsA("Accoutrement") then
+            if child:IsA("Tool") or child:IsA("Accoutrement") or child:IsA("Accessory") then
                 task.wait(0.1)
-                if cloneModel and cloneModel:FindFirstChild(child.Name) then
-                    cloneModel[child.Name]:Destroy()
+                if cloneModel then
+                    for _, obj in ipairs(cloneModel:GetDescendants()) do
+                        if obj.Name == child.Name and obj:IsA("Accessory") then
+                            obj:Destroy()
+                            break
+                        end
+                    end
                 end
-                buildMap()
             end
         end)
 
+        -- ГЛАВНОЕ ИЗМЕНЕНИЕ: Обновление по имени каждый кадр
         renderConn = RunService.RenderStepped:Connect(function()
             if not char or not char.Parent or not cloneModel or not cloneModel.Parent then
                 if renderConn then renderConn:Disconnect() end
@@ -219,9 +242,60 @@ local function applyPlayerFeatures(player)
                 return
             end
 
-            for origPart, clonePart in pairs(partMap) do
-                if origPart and origPart.Parent and clonePart and clonePart.Parent then
-                    clonePart.CFrame = origPart.CFrame
+            -- Обновляем ВСЕ BasePart в клоне по имени из оригинала
+            for _, clonePart in ipairs(cloneModel:GetDescendants()) do
+                if clonePart:IsA("BasePart") then
+                    -- Ищем оригинальную часть с таким же путем/именем
+                    local origPart
+                    
+                    -- Сначала пробуем найти по полному пути
+                    local fullPath = clonePart:GetFullName():sub(#cloneModel:GetFullName() + 2)
+                    if fullPath ~= "" then
+                        origPart = char:FindFirstChild(fullPath, true)
+                    end
+                    
+                    -- Если не нашли, пробуем найти по имени (для аксессуаров)
+                    if not origPart then
+                        -- Проверяем, является ли часть аксессуаром
+                        local parent = clonePart.Parent
+                        local isAccessory = false
+                        while parent do
+                            if parent:IsA("Accessory") then
+                                isAccessory = true
+                                break
+                            end
+                            parent = parent.Parent
+                        end
+                        
+                        if isAccessory then
+                            -- Для аксессуаров ищем Handle в голове
+                            local cloneHead = cloneModel:FindFirstChild("Head")
+                            local origHead = char:FindFirstChild("Head")
+                            if cloneHead and origHead then
+                                -- Ищем аксессуар с таким же именем
+                                for _, cloneAccessory in ipairs(cloneHead:GetChildren()) do
+                                    if cloneAccessory:IsA("Accessory") and cloneAccessory.Name == clonePart.Parent.Name then
+                                        local origAccessory = origHead:FindFirstChild(cloneAccessory.Name)
+                                        if origAccessory then
+                                            local origHandle = origAccessory:FindFirstChild("Handle")
+                                            if origHandle and origHandle:IsA("BasePart") then
+                                                origPart = origHandle
+                                            end
+                                        end
+                                        break
+                                    end
+                                end
+                            end
+                        else
+                            -- Обычная часть - ищем по имени
+                            origPart = char:FindFirstChild(clonePart.Name, true)
+                        end
+                    end
+                    
+                    -- Если нашли оригинал - копируем CFrame
+                    if origPart and origPart:IsA("BasePart") and origPart.Parent then
+                        clonePart.CFrame = origPart.CFrame
+                    end
                 end
             end
         end)
@@ -256,6 +330,7 @@ Players.PlayerRemoving:Connect(function(player)
     end
 end)
 
+-- GUI код (без изменений)
 local MenuGui = Instance.new("ScreenGui")
 MenuGui.Name = "ChamsMenuGui"
 MenuGui.ResetOnSpawn = false
