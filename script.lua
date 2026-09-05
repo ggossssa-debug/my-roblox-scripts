@@ -23,6 +23,51 @@ Viewport.Parent = ScreenGui
 
 local activeChams = {}
 
+-- Функция для определения VR-рук
+local function isVRHand(part)
+    if not part:IsA("BasePart") then return false end
+    
+    -- Проверка по материалу Neon (часто используется для VR-рук)
+    if part.Material == Enum.Material.Neon then
+        return true
+    end
+    
+    -- Проверка по цвету (ярко-зеленый)
+    local color = part.Color
+    if color.G > 0.7 and color.R < 0.3 and color.B < 0.3 then
+        return true
+    end
+    
+    -- Проверка по названию (разные варианты VR-рук)
+    local name = part.Name
+    if name == "RightHand" or name == "LeftHand" or 
+       name == "RightUpperArm" or name == "LeftUpperArm" or
+       name == "RightLowerArm" or name == "LeftLowerArm" or
+       name == "Skull" or name == "Head" then
+        return true
+    end
+    
+    -- Проверка по названию (дополнительные варианты)
+    if string.find(name, "VR") or string.find(name, "Hand") or 
+       string.find(name, "Controller") or string.find(name, "Skull") then
+        return true
+    end
+    
+    return false
+end
+
+-- Функция для очистки VR-рук в клоне
+local function fixVRHands(model)
+    for _, obj in ipairs(model:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            -- Проверяем, является ли часть VR-рукой
+            if isVRHand(obj) then
+                obj.Transparency = 1 -- Делаем невидимой
+            end
+        end
+    end
+end
+
 local function applyNameESP(player, char)
     local head = char:WaitForChild("Head", 15)
     if not head then return end
@@ -75,15 +120,24 @@ local function applyPlayerFeatures(player)
         local cloneModel = char:Clone()
         char.Archivable = false
 
+        -- Сначала удаляем ненужные объекты
         for _, obj in ipairs(cloneModel:GetDescendants()) do
             if obj:IsA("LuaSourceContainer") or obj:IsA("Sound") then
                 obj:Destroy()
             elseif obj:IsA("BasePart") then
                 obj.CanCollide = false
                 obj.Anchored = true
-                obj.Transparency = (obj.Name == "HumanoidRootPart") and 1 or CHAMS_TRANSPARENCY
+                -- Устанавливаем прозрачность для обычных частей
+                if obj.Name ~= "HumanoidRootPart" then
+                    obj.Transparency = CHAMS_TRANSPARENCY
+                else
+                    obj.Transparency = 1
+                end
             end
         end
+
+        -- Применяем очистку VR-рук (делаем их полностью прозрачными)
+        fixVRHands(cloneModel)
 
         cloneModel.Parent = Viewport
 
@@ -125,9 +179,17 @@ local function applyPlayerFeatures(player)
                 elseif obj:IsA("BasePart") then
                     obj.CanCollide = false
                     obj.Anchored = true
-                    obj.Transparency = (obj.Name == "HumanoidRootPart") and 1 or CHAMS_TRANSPARENCY
+                    if obj.Name ~= "HumanoidRootPart" then
+                        obj.Transparency = CHAMS_TRANSPARENCY
+                    else
+                        obj.Transparency = 1
+                    end
                 end
             end
+            
+            -- Применяем очистку VR-рук для обновленного клона
+            fixVRHands(cloneModel)
+            
             cloneModel.Parent = Viewport
             buildMap()
         end)
