@@ -88,6 +88,8 @@ local function applyPlayerFeatures(player)
 
         if activeChams[player] then
             if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
+            if activeChams[player].ChildConn then activeChams[player].ChildConn:Disconnect() end
+            if activeChams[player].ChildRemoveConn then activeChams[player].ChildRemoveConn:Disconnect() end
             if activeChams[player].Model then activeChams[player].Model:Destroy() end
             activeChams[player] = nil
         end
@@ -101,51 +103,92 @@ local function applyPlayerFeatures(player)
 
         local partPairs = {}
 
-        -- Глубокий обход всех вложенных объектов для полного захвата аксессуаров VR
+        -- Функция проверки: находится ли объект внутри персонажа
+        local function isDescendantOfCharacter(obj)
+            return obj:IsDescendantOf(char)
+        end
+
+        -- Функция добавления детали в Viewport
+        local function addPartToClone(obj)
+            if not obj:IsA("BasePart") then return end
+            if isVRHand(obj) or obj.Name == "HumanoidRootPart" then return end
+
+            local clonePart = obj:Clone()
+            
+            for _, child in ipairs(clonePart:GetDescendants()) do
+                if child:IsA("JointInstance") or child:IsA("Script") or child:IsA("LocalScript") then
+                    child:Destroy()
+                end
+            end
+
+            clonePart.CanCollide = false
+            clonePart.Anchored = true
+            clonePart.CastShadow = false
+
+            if obj.Parent and (obj.Parent:IsA("Accessory") or obj.Parent:IsA("Tool")) then
+                clonePart.Transparency = CHAMS_TRANSPARENCY
+            else
+                clonePart.Transparency = obj.Transparency > CHAMS_TRANSPARENCY and obj.Transparency or CHAMS_TRANSPARENCY
+            end
+
+            clonePart.Parent = cloneModel
+            table.insert(partPairs, {Orig = obj, Clone = clonePart})
+        end
+
+        -- Функция полного удаления деталей объекта (например, выброшенного оружия)
+        local function removePartsOfObject(container)
+            for i = #partPairs, 1, -1 do
+                local pair = partPairs[i]
+                if pair.Orig and (pair.Orig:IsDescendantOf(container) or pair.Orig == container) then
+                    if pair.Clone then pair.Clone:Destroy() end
+                    table.remove(partPairs, i)
+                end
+            end
+        end
+
+        -- Инициализация существующих деталей
         for _, obj in ipairs(char:GetDescendants()) do
             if obj:IsA("BasePart") then
-                if isVRHand(obj) or obj.Name == "HumanoidRootPart" then
-                    -- Игнорируем руки VR и служебный HumanoidRootPart
-                else
-                    local clonePart = obj:Clone()
-                    
-                    for _, child in ipairs(clonePart:GetDescendants()) do
-                        if child:IsA("JointInstance") or child:IsA("Script") or child:IsA("LocalScript") then
-                            child:Destroy()
-                        end
-                    end
-
-                    clonePart.CanCollide = false
-                    clonePart.Anchored = true
-                    clonePart.CastShadow = false
-
-                    -- Принудительно показываем аксессуары, даже если скрипты игры скрывают оригинал
-                    if obj.Parent:IsA("Accessory") then
-                        clonePart.Transparency = CHAMS_TRANSPARENCY
-                    else
-                        clonePart.Transparency = obj.Transparency > CHAMS_TRANSPARENCY and obj.Transparency or CHAMS_TRANSPARENCY
-                    end
-
-                    clonePart.Parent = cloneModel
-                    table.insert(partPairs, {Orig = obj, Clone = clonePart})
-                end
+                addPartToClone(obj)
             elseif obj:IsA("Shirt") or obj:IsA("Pants") or obj:IsA("CharacterMesh") or obj:IsA("BodyColors") or obj:IsA("ShirtGraphic") then
                 obj:Clone().Parent = cloneModel
             end
         end
+
+        -- Подписка на взятие оружия в руки
+        local childAddedConn = char.ChildAdded:Connect(function(child)
+            task.wait(0.05)
+            if child:IsA("Tool") or child:IsA("Model") or child:IsA("Accessory") then
+                for _, obj in ipairs(child:GetDescendants()) do
+                    addPartToClone(obj)
+                end
+            end
+        end)
+
+        -- Подписка на убирание/выбрасывание оружия
+        local childRemoveConn = char.ChildRemoved:Connect(function(child)
+            removePartsOfObject(child)
+        end)
 
         cloneModel.Parent = Viewport
 
         local renderConn = RunService.RenderStepped:Connect(function()
             if not char or not char.Parent or not cloneModel or not cloneModel.Parent then
                 if renderConn then renderConn:Disconnect() end
+                if childAddedConn then childAddedConn:Disconnect() end
+                if childRemoveConn then childRemoveConn:Disconnect() end
                 if cloneModel then cloneModel:Destroy() end
                 activeChams[player] = nil
                 return
             end
 
-            for _, pair in ipairs(partPairs) do
-                if pair.Orig and pair.Orig.Parent and pair.Clone and pair.Clone.Parent then
+            -- Проверяем детали каждый кадр и синхронизируем позиции
+            for i = #partPairs, 1, -1 do
+                local pair = partPairs[i]
+                if not pair.Orig or not pair.Orig.Parent or not isDescendantOfCharacter(pair.Orig) then
+                    if pair.Clone then pair.Clone:Destroy() end
+                    table.remove(partPairs, i)
+                else
                     pair.Clone.CFrame = pair.Orig.CFrame
                 end
             end
@@ -153,7 +196,9 @@ local function applyPlayerFeatures(player)
 
         activeChams[player] = {
             Model = cloneModel,
-            Connection = renderConn
+            Connection = renderConn,
+            ChildConn = childAddedConn,
+            ChildRemoveConn = childRemoveConn
         }
     end
 
@@ -172,6 +217,8 @@ Players.PlayerAdded:Connect(applyPlayerFeatures)
 Players.PlayerRemoving:Connect(function(player)
     if activeChams[player] then
         if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
+        if activeChams[player].ChildConn then activeChams[player].ChildConn:Disconnect() end
+        if activeChams[player].ChildRemoveConn then activeChams[player].ChildRemoveConn:Disconnect() end
         if activeChams[player].Model then activeChams[player].Model:Destroy() end
         activeChams[player] = nil
     end
