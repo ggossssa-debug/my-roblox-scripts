@@ -23,7 +23,7 @@ Viewport.Parent = ScreenGui
 
 local activeChams = {}
 
--- Функция для определения VR-рук
+-- Функция для определения VR-рук (без головы!)
 local function isVRHand(part)
     if not part:IsA("BasePart") then return false end
     
@@ -38,18 +38,23 @@ local function isVRHand(part)
         return true
     end
     
-    -- Проверка по названию (разные варианты VR-рук)
+    -- Проверка по названию (только руки, без головы!)
     local name = part.Name
     if name == "RightHand" or name == "LeftHand" or 
        name == "RightUpperArm" or name == "LeftUpperArm" or
        name == "RightLowerArm" or name == "LeftLowerArm" or
-       name == "Skull" or name == "Head" then
+       name == "RightHandPart" or name == "LeftHandPart" then
         return true
     end
     
-    -- Проверка по названию (дополнительные варианты)
-    if string.find(name, "VR") or string.find(name, "Hand") or 
-       string.find(name, "Controller") or string.find(name, "Skull") then
+    -- Проверка по названию (дополнительные варианты для рук)
+    if string.find(name, "VR") and (string.find(name, "Hand") or string.find(name, "Arm") or string.find(name, "Controller")) then
+        return true
+    end
+    
+    -- Проверка специальных VR-частей рук
+    if string.find(name, "Hand") and not string.find(name, "Handle") then
+        -- Дополнительная проверка: если это не Handle от оружия
         return true
     end
     
