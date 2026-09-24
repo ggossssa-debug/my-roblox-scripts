@@ -9,6 +9,12 @@ local Camera = workspace.CurrentCamera
 local espState = true
 local chamsState = true
 
+for _, gui in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
+    if gui.Name == "ViewportXRay" or gui.Name == "ChamsMenuGui" then
+        gui:Destroy()
+    end
+end
+
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "ViewportXRay"
 ScreenGui.ResetOnSpawn = false
@@ -24,31 +30,40 @@ Viewport.LightDirection = Vector3.new(-1, -1, -1)
 Viewport.Ambient = Color3.fromRGB(200, 200, 200)
 Viewport.Parent = ScreenGui
 
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+    Viewport.CurrentCamera = workspace.CurrentCamera
+end)
+
 local activeChams = {}
 
 local function isVRHand(part)
     if not part:IsA("BasePart") then return false end
-    
-    if part.Material == Enum.Material.Neon then
-        return true
-    end
-    
-    local color = part.Color
-    if color.G > 0.7 and color.R < 0.3 and color.B < 0.3 then
-        return true
-    end
-    
+
     local name = part.Name
     if string.find(name, "VR") or string.find(name, "Controller") then
         return true
     end
-    
+
+    local parent = part.Parent
+    if parent and (parent:IsA("Accessory") or parent:IsA("Tool")) then
+        return false
+    end
+
+    if part.Material == Enum.Material.Neon then
+        return true
+    end
+
+    local color = part.Color
+    if color.G > 0.7 and color.R < 0.3 and color.B < 0.3 then
+        return true
+    end
+
     return false
 end
 
 local function applyNameESP(player, char)
     local head = char:WaitForChild("Head", 15)
-    if not head then return end
+    if not head or not char.Parent then return end
 
     local oldGui = head:FindFirstChild("NameESP")
     if oldGui then oldGui:Destroy() end
@@ -74,6 +89,16 @@ local function applyNameESP(player, char)
     label.Parent = billboard
 end
 
+local function clearChams(player)
+    local data = activeChams[player]
+    if not data then return end
+    if data.Connection then data.Connection:Disconnect() end
+    if data.ChildConn then data.ChildConn:Disconnect() end
+    if data.ChildRemoveConn then data.ChildRemoveConn:Disconnect() end
+    if data.Model then data.Model:Destroy() end
+    activeChams[player] = nil
+end
+
 local function applyPlayerFeatures(player)
     if player == LocalPlayer then return end
 
@@ -86,13 +111,7 @@ local function applyPlayerFeatures(player)
         task.wait(0.5)
         if not char.Parent then return end
 
-        if activeChams[player] then
-            if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
-            if activeChams[player].ChildConn then activeChams[player].ChildConn:Disconnect() end
-            if activeChams[player].ChildRemoveConn then activeChams[player].ChildRemoveConn:Disconnect() end
-            if activeChams[player].Model then activeChams[player].Model:Destroy() end
-            activeChams[player] = nil
-        end
+        clearChams(player)
 
         local cloneModel = Instance.new("Model")
         cloneModel.Name = player.Name .. "_Cham"
@@ -103,19 +122,13 @@ local function applyPlayerFeatures(player)
 
         local partPairs = {}
 
-        -- Функция проверки: находится ли объект внутри персонажа
-        local function isDescendantOfCharacter(obj)
-            return obj:IsDescendantOf(char)
-        end
-
-        -- Функция добавления детали в Viewport
         local function addPartToClone(obj)
             if not obj:IsA("BasePart") then return end
             if isVRHand(obj) or obj.Name == "HumanoidRootPart" then return end
 
             local clonePart = obj:Clone()
-            
-            for _, child in ipairs(clonePart:GetDescendants()) do
+
+            for _, child in ipairs(clonePart:GetChildren()) do
                 if child:IsA("JointInstance") or child:IsA("Script") or child:IsA("LocalScript") then
                     child:Destroy()
                 end
@@ -135,7 +148,6 @@ local function applyPlayerFeatures(player)
             table.insert(partPairs, {Orig = obj, Clone = clonePart})
         end
 
-        -- Функция полного удаления деталей объекта (например, выброшенного оружия)
         local function removePartsOfObject(container)
             for i = #partPairs, 1, -1 do
                 local pair = partPairs[i]
@@ -146,7 +158,6 @@ local function applyPlayerFeatures(player)
             end
         end
 
-        -- Инициализация существующих деталей
         for _, obj in ipairs(char:GetDescendants()) do
             if obj:IsA("BasePart") then
                 addPartToClone(obj)
@@ -155,24 +166,24 @@ local function applyPlayerFeatures(player)
             end
         end
 
-        -- Подписка на взятие оружия в руки
         local childAddedConn = char.ChildAdded:Connect(function(child)
-            task.wait(0.05)
             if child:IsA("Tool") or child:IsA("Model") or child:IsA("Accessory") then
-                for _, obj in ipairs(child:GetDescendants()) do
-                    addPartToClone(obj)
-                end
+                task.defer(function()
+                    if not child.Parent then return end
+                    for _, obj in ipairs(child:GetDescendants()) do
+                        addPartToClone(obj)
+                    end
+                end)
             end
         end)
 
-        -- Подписка на убирание/выбрасывание оружия
         local childRemoveConn = char.ChildRemoved:Connect(function(child)
             removePartsOfObject(child)
         end)
 
         cloneModel.Parent = Viewport
 
-        local renderConn = RunService.RenderStepped:Connect(function()
+        local renderConn = RunService.Stepped:Connect(function()
             if not char or not char.Parent or not cloneModel or not cloneModel.Parent then
                 if renderConn then renderConn:Disconnect() end
                 if childAddedConn then childAddedConn:Disconnect() end
@@ -182,10 +193,9 @@ local function applyPlayerFeatures(player)
                 return
             end
 
-            -- Проверяем детали каждый кадр и синхронизируем позиции
             for i = #partPairs, 1, -1 do
                 local pair = partPairs[i]
-                if not pair.Orig or not pair.Orig.Parent or not isDescendantOfCharacter(pair.Orig) then
+                if not pair.Orig or not pair.Orig.Parent then
                     if pair.Clone then pair.Clone:Destroy() end
                     table.remove(partPairs, i)
                 else
@@ -215,16 +225,24 @@ end
 Players.PlayerAdded:Connect(applyPlayerFeatures)
 
 Players.PlayerRemoving:Connect(function(player)
-    if activeChams[player] then
-        if activeChams[player].Connection then activeChams[player].Connection:Disconnect() end
-        if activeChams[player].ChildConn then activeChams[player].ChildConn:Disconnect() end
-        if activeChams[player].ChildRemoveConn then activeChams[player].ChildRemoveConn:Disconnect() end
-        if activeChams[player].Model then activeChams[player].Model:Destroy() end
-        activeChams[player] = nil
-    end
+    clearChams(player)
 end)
 
--- GUI
+Players.PlayerAdded:Connect(function(player)
+    if player == LocalPlayer then return end
+    player.CharacterRemoving:Connect(function()
+        clearChams(player)
+    end)
+end)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        player.CharacterRemoving:Connect(function()
+            clearChams(player)
+        end)
+    end
+end
+
 local MenuGui = Instance.new("ScreenGui")
 MenuGui.Name = "ChamsMenuGui"
 MenuGui.ResetOnSpawn = false
@@ -237,7 +255,6 @@ MainFrame.Position = UDim2.new(0.5, -130, 0.4, -115)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true
 MainFrame.Parent = MenuGui
 
 local UICorner = Instance.new("UICorner")
@@ -305,6 +322,39 @@ SubText.TextSize = 12
 SubText.Font = Enum.Font.SourceSansItalic
 SubText.Parent = MainFrame
 
+do
+    local dragging = false
+    local dragStart, startPos
+
+    MainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = MainFrame.Position
+        end
+    end)
+
+    MainFrame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if not dragging then return end
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
+            MainFrame.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + delta.X,
+                startPos.Y.Scale, startPos.Y.Offset + delta.Y
+            )
+        end
+    end)
+end
+
 ToggleChamsBtn.MouseButton1Click:Connect(function()
     chamsState = not chamsState
     Viewport.Visible = chamsState
@@ -318,10 +368,14 @@ ToggleESPBtn.MouseButton1Click:Connect(function()
     ToggleESPBtn.BackgroundColor3 = espState and Color3.fromRGB(40, 160, 80) or Color3.fromRGB(160, 40, 40)
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p.Character and p.Character:FindFirstChild("Head") then
-            local esp = p.Character.Head:FindFirstChild("NameESP")
-            if esp then
-                esp.Enabled = espState
+        local char = p.Character
+        if char then
+            local head = char:FindFirstChild("Head")
+            if head then
+                local esp = head:FindFirstChild("NameESP")
+                if esp then
+                    esp.Enabled = espState
+                end
             end
         end
     end
@@ -337,7 +391,7 @@ KeybindBtn.MouseButton1Click:Connect(function()
 end)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if isBinding and input.UserInputType == Enum.UserInputType.Keyboard then
+    if isBinding and not gameProcessed and input.UserInputType == Enum.UserInputType.Keyboard then
         currentToggleKey = input.KeyCode
         isBinding = false
         KeybindBtn.Text = "Toggle Menu Key: [" .. input.KeyCode.Name .. "]"
