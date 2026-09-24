@@ -9,6 +9,8 @@ local Camera = workspace.CurrentCamera
 local espState = true
 local chamsState = true
 
+local DEFAULT_NAME_COLOR = Color3.fromRGB(255, 255, 255)
+
 for _, gui in ipairs(LocalPlayer:WaitForChild("PlayerGui"):GetChildren()) do
     if gui.Name == "ViewportXRay" or gui.Name == "ChamsMenuGui" then
         gui:Destroy()
@@ -35,6 +37,13 @@ workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
 end)
 
 local activeChams = {}
+
+local function getTeamColor(player)
+    if player.Team and player.TeamColor then
+        return player.TeamColor.Color
+    end
+    return DEFAULT_NAME_COLOR
+end
 
 local function isVRHand(part)
     if not part:IsA("BasePart") then return false end
@@ -81,7 +90,7 @@ local function applyNameESP(player, char)
     label.Size = UDim2.new(1, 0, 1, 0)
     label.BackgroundTransparency = 1
     label.Text = player.Name
-    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.TextColor3 = getTeamColor(player)
     label.TextStrokeTransparency = 0
     label.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
     label.TextSize = 18
@@ -101,6 +110,22 @@ end
 
 local function applyPlayerFeatures(player)
     if player == LocalPlayer then return end
+
+    local function updateTeamColor()
+        local char = player.Character
+        if not char then return end
+        local head = char:FindFirstChild("Head")
+        if not head then return end
+        local esp = head:FindFirstChild("NameESP")
+        if not esp then return end
+        local label = esp:FindFirstChildOfClass("TextLabel")
+        if label then
+            label.TextColor3 = getTeamColor(player)
+        end
+    end
+
+    player:GetPropertyChangedSignal("TeamColor"):Connect(updateTeamColor)
+    player:GetPropertyChangedSignal("Team"):Connect(updateTeamColor)
 
     local function onCharacterAdded(char)
         task.spawn(function()
